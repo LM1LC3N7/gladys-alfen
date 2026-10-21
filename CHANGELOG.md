@@ -12,44 +12,36 @@ the notes of the version's GitHub Release.
 
 ### Added
 
-- A working example of scene triggers, scene actions and dashboard widgets
-  (Gladys 5.1.0 or later).
-- `CHANGELOG.md`, rolled by the Release workflow.
-- A GitHub Release for every version, with its changelog section as notes: the
-  Gladys Supervision page links each version to the repository's releases.
-- CI runs the tests on Node 22 and 24, and builds the Docker image.
-- Dependabot keeps the npm dependencies and the GitHub Actions up to date.
-- `SECURITY.md` (how to report a vulnerability) and `CLAUDE.md` (project rules
-  for contributors and coding assistants).
-- Manifest tests: `version` matches `package.json`, `docker_image` is tagged
-  with it, descriptions hold 10 to 100 characters, placeholders are
-  multi-language objects.
-- The latitude and longitude fields show an example value as placeholder.
-
-### Changed
-
-- Node.js 22 or later is required (Node 20 is end-of-life).
-- Integration SDK 0.15.0. The tests now run against the fake Gladys of the
-  SDK, which refuses the payloads Gladys refuses.
-- The refresh interval is one minute minimum, the fastest Gladys polls a
-  device. The plug's power is only sent when it changes, and every 30
-  minutes otherwise.
-
-### Fixed
-
-- Gladys refused the devices of the Discovery tab: the weather station and
-  the plug declared their poll frequency in seconds instead of one of the
-  values Gladys accepts, and were never polled. They now poll every minute,
-  and the readings follow the refresh interval of the configuration.
-
-- The release commit no longer fails `npm run format:check`: the Release
-  workflow updates the manifest `version` and `docker_image` in place instead
-  of re-printing the whole file with `jq`.
-- The integration can write to `/data`: the image creates the directory owned
-  by the `node` user, a new Docker volume was owned by root.
-- A sub-container running the integration's own image follows it to the new
-  tag at each release, as well as in the manifest of the build summary: it kept
-  the previous tag, which may not exist on the registry. Sub-containers on a
-  third-party image (a broker, a database...) keep theirs.
-
-[Unreleased]: https://github.com/GladysAssistant/integration-template-js/commits/main
+- Alfen Eve chargers (Single S-line, Single Pro-line, Double Pro-line,
+  socket 1) read over their local HTTPS API (no cloud): one device, keyed by
+  the identity of the charger.
+- One short session at a time on the charger (connect, login, read, logout,
+  close), so that the Alfen app can still log in; never two at once.
+- The self-signed certificate pinned at the first connection and checked
+  before anything is written, the password included; a changed certificate
+  stops everything until "Trust the new certificate" pins exactly the one
+  shown.
+- State, status of the charger, connector and charging state
+  (charging-station category), vehicle plugged in, charge paused, error,
+  power, current and voltage per phase, maximum station current, charging
+  current set, temperature (read only).
+- The meter of the socket as an energy index, through the guard of the P1
+  Monitor integration: never 0, drops and jumps held (kept in `/data`), never
+  confirmed by time, accepted only by the "Accept the held index" action, in
+  two clicks bounded to what the first one listed.
+- "Pause charging" button (maximum station current at 0 A), always available
+  and never held back (not by a command in flight, the minute between
+  changes, a 429/5xx pause, a failed read, nor a restart), sent again when a
+  resume left unconfirmed lands after it; during refused credentials, one
+  login at most every 5 minutes.
+- "Resume charging" button (the station current read before the pause,
+  capped) and a charging current list (6 A to a ceiling of 16 A by default,
+  lowered by the maximum station current), refused unless "Allow resuming
+  and the charging current" is on (off by default); resume refused without a
+  vehicle plugged in; one change a minute.
+- Reads every 60 s (configurable), never sooner, restarts and reconnections
+  included; failures retried after 30 s to 5 minutes; 429 and 5xx pause,
+  kept in `/data`; refused credentials are tried again after 15 min, 1 h,
+  then every 6 h, kept in `/data` (no secret in it).
+- "Test the connection" button; documentation in English and French;
+  `LICENSE` and `THIRD_PARTY_NOTICES.md` shipped in the image.
