@@ -66,9 +66,16 @@ fingerprint (in `/data`) and compares it at every connection, **before
 sending anything**, the password included. If the certificate changes (a
 charger replaced, a firmware update, or another device at the address),
 nothing is sent: the status shows the start of the new fingerprint. If it is
-your charger, click **"Trust the new certificate"**: exactly that
-certificate is pinned, then the charger is read. The very first connection
-trusts the certificate it is given: make it on your trusted network.
+your charger, click **"Trust the new certificate"**, **in two clicks**: the
+first one shows the whole fingerprint (compare it), the second one within
+60 seconds pins exactly that one, then the charger is read; if another
+fingerprint was seen meanwhile, it is shown again. The very first
+connection trusts the certificate it is given: make it on your trusted
+network. If `/data` cannot be written, the first pin is not kept and the
+password is not sent (the status says so). The connection requires TLS 1.2
+at least; the list of algorithms is widened (security level 1, as the Home
+Assistant integration does) for older chargers: the pin, checked before
+anything is sent, vouches for the charger.
 
 The **Test the connection** button reads the charger once if the interval
 since the last read has passed (never more often: neither through this
@@ -109,7 +116,14 @@ changes, not by a 429 or 5xx pause (one session), not by a missing read (it
 needs none), not right after a restart (the identity of the charger is kept
 in `/data`). When the charger refused the credentials, the pause still tries
 a login, **at most one every 5 minutes**: a refused password is never sent
-again in a loop (by a scene for instance).
+again in a loop (by a scene for instance). A pause that goes through lifts
+the block and the reads go on; a refused pause never lengthens the wait of
+the reads.
+
+Before writing, the pause reads the maximum station current when time
+allows: it **keeps in `/data` the value from before the pause** (the one a
+resume writes back), and writes nothing when the charger is already paused
+(no follow-up read then). If that read fails, the pause is written anyway.
 
 When a resume was left without confirmation, it may still reach the charger
 later: a pause sent within the next 90 seconds is watched, and sent again
@@ -121,21 +135,25 @@ afterwards.
 **A pause stays on the charger until a resume**: the maximum station current
 stays at 0 A. With the option below off (the default), only the Alfen
 app (MyEve, Eve Connect) sets that current back: a forgotten pause (by a scene, the AI
-chat) may prevent the next charge and leave the car uncharged.
+chat) may prevent the next charge and leave the car uncharged. **The value to
+set back** is the one from before the pause: the status of the integration
+shows it during the pause ("… A before the pause"). Whether the owner's app
+can change that setting was not checked: the installer tool may be needed.
 
 **"Resume charging"** and **"Set the charging current"** refuse every
 command while **Allow resuming and the charging current** is off (the
 default). On:
 
-- **Resume** sets the maximum station current back to the value read before
-  the pause (the limit of your installation), **capped** by the "Ceiling of
-  the charging current" of the configuration (16 A by default), 6 A if no
-  value was ever read; **refused without a vehicle plugged in**, or on an
-  error or an unknown state. After a resume, the maximum station current is
-  therefore at most that ceiling.
+- **Resume** sets the maximum station current back to **exactly** the value
+  kept at the pause (the limit of your installation), never capped nor
+  guessed: without a value kept (a pause made outside Gladys), the resume is
+  **refused**; refused too **without a vehicle plugged in**, or on an error
+  or an unknown state.
 - **Charging current** (`2129_0`, socket 1): from 6 A to the **ceiling**: the
-  lower of the configured ceiling and the maximum station current. Setting
-  the current during a pause does not resume the charge.
+  lower of the "Ceiling of the charging current" of the configuration (16 A
+  by default; it applies to this current only) and the maximum station
+  current, checked again right before sending. Setting the current during a
+  pause does not resume the charge.
 - **One change a minute at most** (resume or current): no fine regulation
   from Gladys. These are settings of the charger: do not change them all the
   time.

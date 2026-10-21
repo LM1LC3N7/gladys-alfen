@@ -229,6 +229,9 @@ test('the certificate is pinned before the password leaves; another one: nothing
   assert.equal(pause.success, false);
   assert.match(pause.error, /certificat de la borne a changé/);
   assert.equal(server.requests.length, before, 'the pause neither');
+  const first = await gladys.fake.action(ACTIONS.TRUST_CERTIFICATE);
+  assert.match(first.data.message.en, new RegExp(`Certificate refused: ${OTHER_FP}`));
+  assert.equal(store.data.pin, FP, 'the first click pins nothing');
   const ack = await gladys.fake.action(ACTIONS.TRUST_CERTIFICATE);
   await settle();
   assert.match(ack.data.message.en, /AB:AB:AB:AB:AB:AB:AB:AB… is trusted/);
@@ -297,7 +300,7 @@ test('pause: no option, one session writing the station current to 0', async (t)
   assert.deepEqual(server.writes(), [{ '2062_0': '0' }]);
   assert.equal(server.maxOpen, 1, 'never two sessions at once');
   const session = server.routes().slice(READ.length);
-  assert.deepEqual(session.slice(0, 3), ['info', 'login', 'write']);
+  assert.deepEqual(session.slice(0, 5), ['info', 'login', 'generic', 'generic', 'write']);
   await advance(20 * SECOND);
   assert.equal(last(gladys, 'charge-paused'), 1, 'confirmed by a read');
   assert.equal(last(gladys, 'status'), 'Véhicule branché, charge en pause');
@@ -316,7 +319,7 @@ test('resume and current refused unless allowed; nothing written', async (t) => 
   assert.deepEqual(server.writes(), []);
 });
 
-test('resume: the station current read before the pause, capped by the ceiling; refused without a vehicle', async (t) => {
+test('resume: exactly the station current read before the pause (never capped); refused without a vehicle', async (t) => {
   const { server, press, charger, advance, gladys } = await setup(t, {
     config: { ...ALLOWED, max_current: 10 },
   });
@@ -325,9 +328,9 @@ test('resume: the station current read before the pause, capped by the ceiling; 
   await advance(MINUTE);
   ack = await press('resume-charge');
   assert.equal(ack.success, true, ack.error);
-  assert.deepEqual(server.writes().at(-1), { '2062_0': '10' }, '16 A read, capped to 10 A');
+  assert.deepEqual(server.writes().at(-1), { '2062_0': '16' }, 'the 16 A of the installation');
   await advance(20 * SECOND);
-  assert.equal(last(gladys, 'station-max-current'), 10);
+  assert.equal(last(gladys, 'station-max-current'), 16);
   charger.props.states['2501_4'] = 160;
   charger.props.generic['2062_0'] = 0;
   await advance(2 * MINUTE);
@@ -382,10 +385,10 @@ test('a pause takes the charger from a resume under way: never two sessions, the
 test('a late resume landing after a pause: the pause is sent again by the next reads', async (t) => {
   const logs = [];
   const { server, press, advance, charger } = await setup(t, { config: ALLOWED, logs });
-  charger.props.generic['2062_0'] = 0;
+  await press('pause-charge');
   await advance(MINUTE);
   // The resume is applied 12 s later and never answered.
-  charger.writePlan = (i) => (i === 0 ? { applyAfter: 12 * SECOND, answerAfter: 10 * SECOND } : {});
+  charger.writePlan = (i) => (i === 1 ? { applyAfter: 12 * SECOND, answerAfter: 10 * SECOND } : {});
   const resume = await press('resume-charge');
   assert.equal(resume.success, false);
   assert.match(resume.error, /envoyée, sans confirmation/);
@@ -394,7 +397,7 @@ test('a late resume landing after a pause: the pause is sent again by the next r
   await advance(30 * SECOND);
   assert.equal(charger.props.generic['2062_0'], 0, 'the pause reaffirmed after the late resume');
   assert.ok(logs.some((l) => /pause sent again/.test(l)));
-  assert.ok(server.writes().filter((w) => w['2062_0'] === '0').length >= 2);
+  assert.ok(server.writes().filter((w) => w['2062_0'] === '0').length >= 3);
 });
 
 test('a pause before the first read after a restart (a block kept): the device of the identity kept', async (t) => {
@@ -438,9 +441,9 @@ test('a pause during a block: one login at most every 5 minutes', async (t) => {
   await advance(5 * MINUTE, 30 * SECOND);
   ack = await press('pause-charge');
   assert.equal(ack.success, false, 'still refused by the charger');
-  assert.match(ack.error, /refusé la commande \(HTTP 401\)/);
+  assert.match(ack.error, /refusé le nom d'utilisateur ou le mot de passe : non envoyée/);
   assert.equal(logins(), 3, 'one login for the pause');
-  assert.equal(store.data.block.failures, 2);
+  assert.equal(store.data.block.failures, 1, 'the reads keep their spacing');
 });
 
 test('429 or 5xx: the pause still goes, the others wait; 5xx on the temperature never stops the rest', async (t) => {
@@ -617,10 +620,10 @@ test('a reconnection during a read starts no other read; an old configuration pu
 test('a resend of the pause that fails keeps its reaffirmation (twice at most)', async (t) => {
   const logs = [];
   const { server, press, advance, charger } = await setup(t, { config: ALLOWED, logs });
-  charger.props.generic['2062_0'] = 0;
+  await press('pause-charge');
   await advance(MINUTE);
   charger.writePlan = (i) =>
-    i === 0 ? { applyAfter: 12 * SECOND, answerAfter: 10 * SECOND } : undefined;
+    i === 1 ? { applyAfter: 12 * SECOND, answerAfter: 10 * SECOND } : undefined;
   await press('resume-charge');
   const pause = await press('pause-charge');
   assert.equal(pause.success, true, pause.error);
@@ -628,7 +631,7 @@ test('a resend of the pause that fails keeps its reaffirmation (twice at most)',
   charger.statuses.write = 500;
   await advance(60 * SECOND);
   const zeros = server.writes().filter((w) => w['2062_0'] === '0').length;
-  assert.equal(zeros, 3, 'the pause, then two resends that failed');
+  assert.equal(zeros, 4, 'two pauses, then two resends that failed');
   assert.equal(logs.filter((l) => /pause reaffirmed failed/.test(l)).length, 2);
   assert.equal(server.maxOpen, 1);
 });

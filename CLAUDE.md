@@ -94,6 +94,7 @@ test/                             node --test, against the SDK's fake Gladys (in
   429/5xx pause, before the first read; a block allows one login every
   5 minutes); resume and current are behind `allow_commands` (off), decided
   on a read of the same session, checked again in `beforeSend` (option,
-  deadline, a pause arrived), one a minute, capped. A command is confirmed
+  deadline, a pause arrived, the ceiling), one a minute; the resume writes
+  back exactly the station current kept at the pause (refused when none). A command is confirmed
   only by a read of the value asked. The energy index goes through
   `src/guard.js` only.

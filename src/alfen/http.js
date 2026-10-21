@@ -53,6 +53,10 @@ export const ERROR_KINDS = Object.freeze({
   ABORTED: 'aborted',
   /** A write refused by the charger (4xx). */
   REJECTED: 'rejected',
+  /** The session belongs to a configuration replaced meanwhile: given up, nothing written. */
+  STALE: 'stale',
+  /** The first pin could not be kept in /data: the password is not sent. */
+  STORAGE: 'storage',
 });
 
 export class ChargerError extends Error {
@@ -74,6 +78,8 @@ export const notSent = (err) =>
     ERROR_KINDS.LATE,
     ERROR_KINDS.CERTIFICATE,
     ERROR_KINDS.OTHER_CHARGER,
+    ERROR_KINDS.STALE,
+    ERROR_KINDS.STORAGE,
   ].includes(err?.kind);
 
 const CRLF = Buffer.from('\r\n\r\n');
@@ -126,8 +132,13 @@ export class AnswerParser {
         return false;
       }
       offset = end + 4 - this.head.length;
-      this.parseHead(joined.subarray(0, end).toString('latin1'));
       this.head = Buffer.alloc(0);
+      if (this.parseHead(joined.subarray(0, end).toString('latin1')) === 'interim') {
+        // A 1xx answer (100 Continue…) is not the answer: skipped, 4 at most.
+        this.interims = (this.interims ?? 0) + 1;
+        if (this.interims > 4) this.fail('Too many interim answers');
+        return this.push(chunk.subarray(offset));
+      }
     }
     this.feed(chunk, offset);
     return this.done;
@@ -145,6 +156,10 @@ export class AnswerParser {
       const name = line.slice(0, at).trim().toLowerCase();
       if (!/^[a-z0-9-]{1,64}$/.test(name)) this.fail('Bad header');
       headers[name] = line.slice(at + 1).trim();
+    }
+    if (this.status >= 100 && this.status < 200 && this.status !== 101) {
+      this.status = 0;
+      return 'interim';
     }
     this.headers = headers;
     const connection = String(headers.connection ?? '').toLowerCase();
@@ -269,6 +284,9 @@ export function openConnection({ host, port, timeoutMs }) {
         port,
         servername: isIP(host) ? undefined : host,
         rejectUnauthorized: false,
+        // TLS 1.2 at least, whatever NODE_OPTIONS says; the cipher list at
+        // security level 1 for older embedded TLS (the pin vouches for the charger).
+        minVersion: 'TLSv1.2',
         ciphers: 'DEFAULT@SECLEVEL=1',
       });
     } catch (err) {

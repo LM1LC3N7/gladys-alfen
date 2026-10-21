@@ -130,6 +130,19 @@ export const T = {
       `The certificate of the charger changed (now ${shortFingerprint(fingerprint)}…): nothing is sent to it, the password neither. If you replaced or updated the charger, click "Trust the new certificate".`,
       `Le certificat de la borne a changé (maintenant ${shortFingerprint(fingerprint)}…) : rien ne lui est envoyé, le mot de passe non plus. Si vous avez remplacé ou mis à jour la borne, cliquez sur « Faire confiance au nouveau certificat ».`,
     ),
+  storage: both(
+    'The certificate of the charger could not be kept in /data: the password is not sent until it can (check the storage of Gladys).',
+    "Le certificat de la borne n'a pas pu être gardé dans /data : le mot de passe n'est pas envoyé tant que ce n'est pas possible (vérifiez le stockage de Gladys).",
+  ),
+  pausedKept: (amps) =>
+    both(
+      `Paused by a maximum station current of 0 A; ${amps} A before the pause, the value a resume writes back (to set in the Alfen app when resuming is off).`,
+      `En pause par un courant maximal de la borne à 0 A ; ${amps} A avant la pause, la valeur qu'une reprise réécrit (à remettre dans l'application Alfen quand la reprise est désactivée).`,
+    ),
+  pausedUnknown: both(
+    'Paused by a maximum station current of 0 A; its value before the pause is unknown: set it back in the Alfen app (a resume from Gladys is refused).',
+    "En pause par un courant maximal de la borne à 0 A ; sa valeur avant la pause est inconnue : remettez-la dans l'application Alfen (une reprise depuis Gladys est refusée).",
+  ),
   noId: both(
     'The charger answered without a valid identity: it cannot be added.',
     'La borne a répondu sans identité valable : elle ne peut pas être ajoutée.',
@@ -165,6 +178,11 @@ export const T = {
       ),
   },
   trust: {
+    confirm: (fingerprint) =>
+      both(
+        `Certificate refused: ${fingerprint}. Compare it, then click again within 60 s to trust exactly this one.`,
+        `Certificat refusé : ${fingerprint}. Comparez-le, puis cliquez de nouveau dans les 60 s pour approuver exactement celui-ci.`,
+      ),
     nothing: both(
       'No new certificate was refused: nothing to trust.',
       "Aucun nouveau certificat n'a été refusé : rien à approuver.",
@@ -211,6 +229,27 @@ export const ERRORS = {
     'The certificate of the charger changed: nothing is sent to it ("Trust the new certificate" in the configuration).',
     'Le certificat de la borne a changé : rien ne lui est envoyé (« Faire confiance au nouveau certificat » dans la configuration).',
   ),
+  storage: both(
+    'The certificate of the charger could not be kept in /data: the password is not sent. Not sent.',
+    "Le certificat de la borne n'a pas pu être gardé dans /data : le mot de passe n'est pas envoyé. Non envoyée.",
+  ),
+  noResumeValue: both(
+    'The maximum station current before the pause is unknown (paused outside Gladys?): set it back in the Alfen app. Not sent.',
+    "Le courant maximal de la borne avant la pause est inconnu (pause faite hors de Gladys ?) : remettez-le dans l'application Alfen. Non envoyée.",
+  ),
+  sessionLost: both(
+    'The charger closed the session before the command (another app logged in?): not sent.',
+    'La borne a fermé la session avant la commande (une autre application connectée ?) : non envoyée.',
+  ),
+  credentialsRefused: both(
+    'The charger refused the user name or the password: not sent.',
+    "La borne a refusé le nom d'utilisateur ou le mot de passe : non envoyée.",
+  ),
+  rateLimitedNotSent: (wait) =>
+    both(
+      `The charger asks to slow down (HTTP 429): not sent, pause of ${wait.en} ("Pause charging" stays available).`,
+      `La borne demande de ralentir (HTTP 429) : non envoyée, pause de ${wait.fr} (« Mettre la charge en pause » reste disponible).`,
+    ),
   badButton: both('A button only accepts the value 1.', "Un bouton n'accepte que la valeur 1."),
   badCurrent: both(
     'The charging current must be a whole number of amperes.',

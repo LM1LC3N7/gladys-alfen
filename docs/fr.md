@@ -68,10 +68,17 @@ SHA-256 (dans `/data`) et la compare ensuite à chaque connexion, **avant
 d'envoyer quoi que ce soit**, le mot de passe compris. Si le certificat
 change (borne remplacée, mise à jour, ou autre appareil à l'adresse), rien
 n'est envoyé : l'état affiche le début de la nouvelle empreinte. Si c'est
-bien votre borne, cliquez sur **« Faire confiance au nouveau certificat »** :
-exactement ce certificat est épinglé, puis la borne est lue. La toute
-première connexion fait confiance au certificat présenté : faites-la sur
-votre réseau de confiance.
+bien votre borne, cliquez sur **« Faire confiance au nouveau certificat »**,
+**en deux clics** : le premier montre l'empreinte entière (comparez-la), le
+second dans les 60 secondes épingle exactement celle-là, puis la borne est
+lue ; si une autre empreinte a été vue entre-temps, elle est montrée de
+nouveau. La toute première connexion fait confiance au certificat présenté :
+faites-la sur votre réseau de confiance. Si `/data` ne peut pas être écrit,
+la première épingle n'est pas gardée et le mot de passe n'est pas envoyé
+(l'état le dit). La connexion exige TLS 1.2 au moins ; la liste des
+algorithmes est élargie (niveau de sécurité 1, comme l'intégration Home
+Assistant) pour les bornes anciennes : c'est l'épingle, vérifiée avant tout
+envoi, qui garantit la borne.
 
 Le bouton **Tester la connexion** lit la borne une fois si l'intervalle
 depuis la dernière lecture est passé (jamais plus souvent : ni par ce bouton,
@@ -116,7 +123,15 @@ seule session), ni par l'absence de lecture (elle n'en a pas besoin), ni
 juste après un redémarrage (l'identité de la borne est gardée dans `/data`).
 Quand la borne a refusé les identifiants, la pause tente quand même une
 connexion, **au plus une toutes les 5 minutes** : un mot de passe refusé
-n'est jamais renvoyé en boucle (par une scène par exemple).
+n'est jamais renvoyé en boucle (par une scène par exemple). Une pause qui
+passe lève le blocage et les lectures reprennent ; une pause refusée
+n'allonge pas l'attente des lectures.
+
+Avant d'écrire, la pause relit le courant maximal de la borne quand le temps
+le permet : elle **garde dans `/data` la valeur d'avant la pause** (celle
+qu'une reprise réécrira), et n'écrit rien si la borne est déjà en pause (pas
+de lecture de suivi alors). Si cette lecture échoue, la pause est écrite
+quand même.
 
 Quand une reprise est restée sans confirmation, elle peut encore atteindre la
 borne plus tard : une pause envoyée dans les 90 secondes qui suivent est
@@ -130,21 +145,25 @@ après.
 la borne reste à 0 A. Avec l'option ci-dessous désactivée (par défaut), seule
 l'application Alfen (MyEve, Eve Connect) remet ce courant : une pause oubliée
 (par une scène, le chat IA) peut empêcher la charge suivante et laisser la
-voiture non chargée.
+voiture non chargée. **La valeur à remettre** est celle d'avant la pause :
+l'état de l'intégration l'affiche pendant la pause (« … A avant la pause »).
+Que l'application du propriétaire puisse modifier ce réglage n'a pas été
+vérifié : il faut parfois l'outil de l'installateur.
 
 **« Reprendre la charge »** et **« Régler le courant de charge »** refusent
 toute commande tant que **Autoriser la reprise et le courant de charge** est
 désactivé (par défaut). Activé :
 
-- **Reprendre** remet le courant maximal de la borne à la valeur lue avant la
-  pause (la limite de votre installation), **plafonnée** par le « Plafond du
-  courant de charge » de la configuration (16 A par défaut), 6 A si aucune
-  valeur n'a jamais été lue ; **refusé sans véhicule branché**, ou sur une
-  erreur ou un état inconnu. Après une reprise, le courant maximal de la
-  borne est donc au plus ce plafond.
+- **Reprendre** remet le courant maximal de la borne à **exactement** la
+  valeur gardée au moment de la pause (la limite de votre installation),
+  jamais plafonnée ni devinée : sans valeur gardée (pause faite hors de
+  Gladys), la reprise est **refusée** ; refusée aussi **sans véhicule
+  branché**, ou sur une erreur ou un état inconnu.
 - **Courant de charge** (`2129_0`, la prise 1) : de 6 A au **plafond** : le
-  plus bas du plafond de la configuration et du courant maximal de la borne.
-  Régler le courant pendant une pause ne reprend pas la charge.
+  plus bas du « Plafond du courant de charge » de la configuration (16 A par
+  défaut ; il ne s'applique qu'à ce courant) et du courant maximal de la
+  borne, revérifié juste avant l'envoi. Régler le courant pendant une pause
+  ne reprend pas la charge.
 - **Un changement par minute au plus** (reprise ou courant) : pas de
   régulation fine depuis Gladys. Ce sont des réglages de la borne : ne les
   changez pas sans cesse.

@@ -236,8 +236,9 @@ export class AlfenApp {
     this.generation += 1;
     this.clearTimer();
     this.clearFollowUps();
-    // A read under way is given up (a command finishes, refused by its checks).
-    if (this.session?.kind === SESSION.POLL) {
+    // A session of the old configuration is given up: it would be refused by
+    // its checks anyway (generation), and it must not hold the charger.
+    if (this.session) {
       this.abortSession(this.session);
     }
     this.publisher.stop();
@@ -303,6 +304,9 @@ export class AlfenApp {
     if (credentialsKey(normalizeConfig(raw)) === credentialsKey(this.config)) {
       return;
     }
+    // First, before any wait: a late answer to the old credentials (a read, a
+    // command) belongs to the old generation and never blocks the new ones.
+    this.stop();
     this.memory.block = null;
     this.memory.last = null;
     this.lastReadAt = -Infinity;
@@ -365,13 +369,15 @@ export class AlfenApp {
   async saveMemory() {
     const json = JSON.stringify(this.memory);
     if (json === this.savedMemory) {
-      return;
+      return true;
     }
     try {
       await this.store.save(this.memory);
       this.savedMemory = json;
+      return true;
     } catch (err) {
       this.logger.warn(`Saving the state to /data failed: ${err?.code ?? 'error'}`);
+      return false;
     }
   }
 
@@ -396,7 +402,13 @@ export class AlfenApp {
    * /data before the password leaves). Another one is refused, and kept for
    * "Trust the new certificate".
    */
-  async trust(fingerprint) {
+  async trust(fingerprint, { target, generation }) {
+    const stale = () =>
+      new ChargerError(ERROR_KINDS.STALE, 'The configuration changed', { notSent: true });
+    // A session of another address or configuration pins nothing and sends nothing.
+    if (generation !== this.generation || this.memory.target !== target) {
+      throw stale();
+    }
     const pin = this.memory.pin;
     if (pin && pin !== fingerprint) {
       if (this.memory.refusedPin !== fingerprint) {
@@ -409,15 +421,46 @@ export class AlfenApp {
         fingerprint,
       });
     }
-    if (!pin) {
-      this.memory.pin = fingerprint;
-      this.logger.info('Alfen: certificate of the charger pinned (first connection)');
-    }
     if (this.memory.refusedPin) {
       // The pinned certificate is back: nothing to trust any more.
       this.memory.refusedPin = null;
+      this.pendingTrust = undefined;
     }
-    await this.saveMemory();
+    if (!pin) {
+      this.memory.pin = fingerprint;
+      // The first pin must be in /data before the password leaves: otherwise
+      // a restart would trust whatever answers next.
+      if (!(await this.saveMemory())) {
+        if (this.memory.pin === fingerprint) this.memory.pin = null;
+        throw new ChargerError(ERROR_KINDS.STORAGE, '/data not writable', { notSent: true });
+      }
+      this.logger.info('Alfen: certificate of the charger pinned (first connection)');
+    } else {
+      await this.saveMemory();
+    }
+    if (generation !== this.generation || this.memory.target !== target) {
+      throw stale();
+    }
+  }
+
+  /**
+   * A login accepted by the charger, whatever the session: the credentials
+   * work, so a block is lifted (a pause during a block that went through)
+   * and the reads go on at the interval. Only for the credentials of now.
+   */
+  async loggedIn(generation, credentials, entry) {
+    entry.loggedIn = true;
+    if (generation !== this.generation || credentials !== credentialsKey(this.config)) {
+      return;
+    }
+    if (this.memory.block) {
+      this.memory.block = null;
+      await this.saveMemory();
+      this.logger.info('Alfen: credentials accepted, block lifted');
+      if (!this.charger.running && this.readable) {
+        this.schedule();
+      }
+    }
   }
 
   /**
@@ -470,23 +513,60 @@ export class AlfenApp {
       }),
     ]);
     this.timers.clearTimeout(timer);
-    if (this.session === current && !preempt) {
+    if (this.busy && !preempt) {
       throw this.refusal(ERRORS.stillRunning);
     }
   }
 
-  /** One session on the charger (see AlfenClient.session), held in `this.session`. */
-  async openSession(kind, work, { deadline, serial, logoutTimeout = TIMINGS.logoutTimeout }) {
+  /**
+   * A session holds the charger. One given up does not: its connection is
+   * closed (the charger authenticates the connection), or it never logged in.
+   */
+  get busy() {
+    return Boolean(this.session) && !this.session.aborted;
+  }
+
+  /** Takes the charger, again after every wait (another session may have started meanwhile). */
+  async acquire(kind, by) {
+    for (let i = 0; i < 3; i += 1) {
+      await this.takeCharger(kind, by);
+      if (!this.busy) {
+        return;
+      }
+    }
+    throw this.refusal(ERRORS.stillRunning);
+  }
+
+  /**
+   * One session on the charger (see AlfenClient.session), held in
+   * `this.session`. The address, the credentials, the target of the pin and
+   * the generation are those of now, fixed for the whole session. Never
+   * while another one holds the charger.
+   */
+  async openSession(
+    kind,
+    work,
+    { deadline, serial, generation = this.generation, logoutTimeout = TIMINGS.logoutTimeout },
+  ) {
+    if (this.busy) {
+      throw this.refusal(ERRORS.stillRunning);
+    }
+    if (generation !== this.generation) {
+      throw new ChargerError(ERROR_KINDS.STALE, 'The configuration changed', { notSent: true });
+    }
     let release;
     const entry = {
       kind,
       connection: undefined,
       aborted: false,
+      loggedIn: false,
       done: new Promise((resolve) => {
         release = resolve;
       }),
     };
     this.session = entry;
+    const target = targetKey(this.config) ?? null;
+    const credentials = credentialsKey(this.config);
     try {
       return await this.client.session(
         {
@@ -495,8 +575,9 @@ export class AlfenApp {
           deadline,
           requestTimeout: TIMINGS.readTimeout,
           logoutTimeout,
-          trust: (fingerprint) => this.trust(fingerprint),
+          trust: (fingerprint) => this.trust(fingerprint, { target, generation }),
           identify: (info, error) => this.identify(kind, info, error, serial),
+          onLogin: () => this.loggedIn(generation, credentials, entry),
           onOpen: (connection) => {
             entry.connection = connection;
             if (entry.aborted) {
@@ -594,20 +675,29 @@ export class AlfenApp {
     }
     // Never sooner than the interval after the last read, whatever restarted
     // or clicked; only the two reads after a command go sooner.
-    if ((!followUp && this.now() < this.due) || this.session) {
+    if ((!followUp && this.now() < this.due) || this.busy) {
       // A session under way (a command) holds the charger: this read waits.
       await this.publishAll();
-      this.schedule(this.session ? this.interval : this.due - this.now());
+      this.schedule(this.busy ? this.interval : this.due - this.now());
       return;
     }
     let delay;
     await this.markRead();
+    if (generation !== this.generation) {
+      return;
+    }
+    if (this.busy) {
+      // A command or a pause took the charger while /data was written: this read waits.
+      await this.publishAll();
+      this.schedule(this.interval);
+      return;
+    }
     try {
       const startedAt = this.now();
       const read = await this.openSession(
         SESSION.POLL,
         (api, info, entry) => this.readAll(api, info, entry, generation),
-        { deadline: this.now() + 6 * TIMINGS.readTimeout },
+        { deadline: this.now() + 6 * TIMINGS.readTimeout, generation },
       );
       if (generation !== this.generation) {
         return;
@@ -703,11 +793,9 @@ export class AlfenApp {
   /** fromCommand: the fresh read of a command (never reaffirms a pause: it would race it). */
   applyControl(control, { fromCommand = false } = {}) {
     const c = this.charger;
+    // The station current a resume writes back is kept at the pause only
+    // (keepResumeCurrent), never by a read: a read during a pause shows 0.
     c.control = control;
-    // The station current "Resume charging" writes back (the installation limit).
-    if (control.stationMax !== undefined && control.stationMax >= CURRENT.min) {
-      this.memory.resumeCurrent = Math.min(80, Math.floor(control.stationMax));
-    }
     if (c.serial) {
       this.observe(c.serial, control, { fromCommand });
     }
@@ -843,6 +931,9 @@ export class AlfenApp {
       if (c.error === ERROR_KINDS.SESSION) {
         return [false, T.sessionLost(wait)];
       }
+      if (c.error === ERROR_KINDS.STORAGE) {
+        return [false, T.storage];
+      }
       return [
         false,
         c.error === ERROR_KINDS.UNREACHABLE || c.error === ERROR_KINDS.TIMEOUT
@@ -857,6 +948,13 @@ export class AlfenApp {
       return [false, T.noId];
     }
     let summary = this.summary();
+    if (c.control?.paused === true) {
+      // The value to set back (from Gladys, or in the Alfen app with resuming off).
+      summary = join(
+        summary,
+        this.memory.resumeCurrent ? T.pausedKept(this.memory.resumeCurrent) : T.pausedUnknown,
+      );
+    }
     const held = this.currentHold();
     if (held) {
       summary = join(summary, T.held(held));
@@ -1144,15 +1242,30 @@ export class AlfenApp {
   }
 
   /**
-   * "Trust the new certificate": pins exactly the certificate refused last
-   * (the one the status shows), then reads at once (a choice of the user,
+   * "Trust the new certificate", in two clicks: the first one shows the whole
+   * fingerprint refused and pins nothing; a second one within 60 s pins
+   * exactly that fingerprint, if it is still the one refused (another one
+   * seen meanwhile: shown again), then reads at once (a choice of the user,
    * like new credentials). Never a certificate that was not shown.
    */
   async trustCertificate() {
     const refused = this.memory.refusedPin;
     if (!refused || !this.readable) {
+      this.pendingTrust = undefined;
       return T.trust.nothing;
     }
+    const pending = this.pendingTrust;
+    const now = this.now();
+    if (
+      !pending ||
+      pending.fingerprint !== refused ||
+      now - pending.at > TIMINGS.acceptConfirm ||
+      now < pending.at
+    ) {
+      this.pendingTrust = { fingerprint: refused, at: now };
+      return T.trust.confirm(refused);
+    }
+    this.pendingTrust = undefined;
     this.memory.pin = refused;
     this.memory.refusedPin = null;
     this.memory.last = null;
@@ -1369,8 +1482,7 @@ export class AlfenApp {
 
   /**
    * What to write (`{ id, value, guardKey, expected, from }`), from the state
-   * just read; undefined when already so. A pause is always written (it needs
-   * no read, and writing it again is harmless).
+   * just read; undefined when already so.
    */
   plan(role, wanted, fresh, serial) {
     if (role === FEATURES.PAUSE) {
@@ -1379,7 +1491,7 @@ export class AlfenApp {
         value: 0,
         guardKey: 'pause',
         expected: true,
-        from: this.charger.control?.paused,
+        from: fresh?.control?.paused ?? this.charger.control?.paused,
       };
     }
     const control = fresh.control;
@@ -1397,12 +1509,13 @@ export class AlfenApp {
       if (control.paused === false && !this.guardActive(serial, 'pause')) {
         return undefined;
       }
-      // The station current read before the pause (the installation limit),
-      // capped by the ceiling of the configuration; 6 A when never read.
-      const value = Math.max(
-        CURRENT.min,
-        Math.min(this.memory.resumeCurrent ?? CURRENT.min, this.config.maxCurrent),
-      );
+      // Exactly the station current read just before the pause (the setting
+      // of the installation): never capped (the ceiling of the configuration
+      // is for the current of the socket), never guessed.
+      const value = this.memory.resumeCurrent;
+      if (!value) {
+        throw this.refusal(ERRORS.noResumeValue);
+      }
       return {
         id: PROPS.STATION_MAX,
         value,
@@ -1438,6 +1551,31 @@ export class AlfenApp {
     return this.now() < this.memory.unconfirmedResumeUntil;
   }
 
+  /** A resume of Gladys may still land: in flight, overtaken, unconfirmed, or under its guard. */
+  resumeMayLand(entry, serial) {
+    const guard = this.guards.get(`${serial}:pause`);
+    return (
+      entry.overtaken?.role === FEATURES.RESUME ||
+      this.inFlight?.role === FEATURES.RESUME ||
+      this.unconfirmedResume ||
+      (this.guardActive(serial, 'pause') && guard?.expected === false)
+    );
+  }
+
+  /**
+   * The station current a resume writes back, kept in /data at the pause,
+   * before 0 is written: the value read just before (in the session of the
+   * pause, else the last read). A value under 6 A (already paused) never
+   * replaces the one kept.
+   */
+  async keepResumeCurrent(control) {
+    const station = control?.stationMax;
+    if (station !== undefined && station >= CURRENT.min) {
+      this.memory.resumeCurrent = Math.min(CURRENT.station, Math.floor(station));
+      await this.saveMemory();
+    }
+  }
+
   async command({ serial, role }, wanted, received, entry) {
     const generation = this.generation;
     const isPause = role === FEATURES.PAUSE;
@@ -1445,71 +1583,112 @@ export class AlfenApp {
     const answerBy = received + TIMINGS.commandAnswerBy;
     const c = this.charger;
     this.checkBeforeSend(generation, serial, role);
-    await this.takeCharger(
-      isPause ? SESSION.PAUSE : SESSION.COMMAND,
-      sendBy - TIMINGS.commandMinSend,
-    );
+    await this.acquire(isPause ? SESSION.PAUSE : SESSION.COMMAND, sendBy - TIMINGS.commandMinSend);
     if (this.pauseArrived(entry)) {
       throw this.refusal(ERRORS.pauseMeanwhile);
     }
     this.checkBeforeSend(generation, serial, role);
     let plan;
-    try {
-      await this.openSession(
-        isPause ? SESSION.PAUSE : SESSION.COMMAND,
-        async (api, _info, session) => {
-          if (!isPause) {
-            // The state just before acting, read in this session, never the one in memory.
-            const readStart = this.now();
-            const generic = await api.props(CATEGORIES.GENERIC);
-            const states = await api.props(CATEGORIES.STATES);
-            if (generation !== this.generation || session.aborted) {
-              throw new ChargerError(ERROR_KINDS.ABORTED, 'Session given up', { notSent: true });
+    let freshControl;
+    const work = (skipRead) => async (api, _info, session) => {
+      const readStart = this.now();
+      const given = () => generation !== this.generation || session.aborted;
+      if (!isPause) {
+        // The state just before acting, read in this session, never the one in memory.
+        const generic = await api.props(CATEGORIES.GENERIC);
+        const states = await api.props(CATEGORIES.STATES);
+        if (given()) {
+          throw new ChargerError(ERROR_KINDS.ABORTED, 'Session given up', { notSent: true });
+        }
+        const fresh = { control: parseControl(generic), status: parseStatus(states) };
+        freshControl = fresh.control;
+        this.applyFresh(fresh, readStart);
+        plan = this.plan(role, wanted, fresh, serial);
+      } else {
+        // A pause reads the control first when time allows (never needed:
+        // a read that fails or lags never stops it): the station current to
+        // write back on a resume, and nothing written when already paused.
+        let control;
+        if (!skipRead && sendBy - this.now() >= TIMINGS.pauseReadMin) {
+          try {
+            control = parseControl(
+              await api.props(CATEGORIES.GENERIC, {
+                by: sendBy - TIMINGS.commandMinSend,
+                timeout: TIMINGS.pauseReadMax,
+              }),
+            );
+          } catch (err) {
+            if (err.kind === ERROR_KINDS.ABORTED || err.refusal) throw err;
+            if (api.closed) {
+              // The connection is gone with the read: the pause goes in a new session.
+              throw new ChargerError(ERROR_KINDS.SESSION, 'Read failed', {
+                notSent: true,
+                retryWithoutRead: true,
+              });
             }
-            const fresh = { control: parseControl(generic), status: parseStatus(states) };
-            // Applied only when no command left during the read.
-            if (readStart > c.lastSentAt) {
-              c.status = fresh.status;
-              this.applyControl(fresh.control, { fromCommand: true });
-              // Shown in the background: the ack never waits for Gladys.
-              this.publishAll().catch((err) =>
-                this.logger.warn(`Publishing failed: ${err.message}`),
-              );
-            }
-            plan = this.plan(role, wanted, fresh, serial);
-          } else {
-            plan = this.plan(role);
           }
-          if (!plan) {
+        }
+        if (given()) {
+          throw new ChargerError(ERROR_KINDS.ABORTED, 'Session given up', { notSent: true });
+        }
+        if (control) {
+          this.applyFresh({ control }, readStart);
+          await this.keepResumeCurrent(control);
+          if (control.paused === true && !this.resumeMayLand(entry, serial)) {
+            // Already paused, decided on this read: nothing written.
+            plan = undefined;
             return;
           }
-          await api.write(plan.id, plan.value, {
-            timeoutMs: Math.max(200, answerBy - this.now()),
-            // The last checks, right before the bytes go.
-            beforeSend: () => {
-              this.checkBeforeSend(generation, serial, role);
-              if (this.pauseArrived(entry) || session.aborted) {
-                throw this.refusal(ERRORS.pauseMeanwhile);
-              }
-              if (this.now() > sendBy) {
-                throw this.refusal(ERRORS.tooSlow);
-              }
-              this.markSent(entry, role);
-              this.logger.info(`Alfen: ${role} (${plan.id}=${plan.value})`);
-            },
-          });
+        } else {
+          await this.keepResumeCurrent(c.control);
+        }
+        plan = this.plan(role, undefined, control ? { control } : undefined);
+      }
+      if (!plan) {
+        return;
+      }
+      await api.write(plan.id, plan.value, {
+        timeoutMs: Math.max(200, answerBy - this.now()),
+        // The last checks, right before the bytes go.
+        beforeSend: () => {
+          this.checkBeforeSend(generation, serial, role);
+          if (this.pauseArrived(entry) || session.aborted) {
+            throw this.refusal(ERRORS.pauseMeanwhile);
+          }
+          if (this.now() > sendBy) {
+            throw this.refusal(ERRORS.tooSlow);
+          }
+          if (role === FEATURES.SET_CURRENT && plan.value > this.ceilingOf(freshControl)) {
+            // The ceiling lowered meanwhile.
+            throw this.refusal(ERRORS.outOfBounds(CURRENT.min, this.ceilingOf(freshControl)));
+          }
+          this.markSent(entry, role);
+          this.logger.info(`Alfen: ${role} (${plan.id}=${plan.value})`);
         },
-        {
-          deadline: sendBy - (isPause ? 0 : TIMINGS.commandMinSend),
-          serial,
-          // The ack must reach Gladys within 5 s: the logout never delays it.
-          logoutTimeout: () => Math.min(TIMINGS.logoutTimeout, answerBy + 400 - this.now()),
-        },
-      );
+      });
+    };
+    const attempt = (skipRead) =>
+      this.openSession(isPause ? SESSION.PAUSE : SESSION.COMMAND, work(skipRead), {
+        deadline: sendBy - (isPause ? 0 : TIMINGS.commandMinSend),
+        serial,
+        generation,
+        // The ack must reach Gladys within 5 s: the logout never delays it.
+        logoutTimeout: () => Math.min(TIMINGS.logoutTimeout, answerBy + 400 - this.now()),
+      });
+    try {
+      try {
+        await attempt(false);
+      } catch (err) {
+        if (!err?.retryWithoutRead || this.now() > sendBy - TIMINGS.commandMinSend) {
+          throw err;
+        }
+        await attempt(true);
+      }
     } catch (err) {
-      throw await this.commandFailed(err, { serial, role, entry, plan });
+      throw await this.commandFailed(err, { serial, role, entry, plan, generation });
     }
-    if (!plan) {
+    if (!plan || generation !== this.generation) {
+      // Nothing written (already so), or an answer of a configuration replaced since.
       return;
     }
     // Accepted by the charger: confirmed only by a read showing the value
@@ -1518,10 +1697,25 @@ export class AlfenApp {
     this.followUp();
   }
 
+  /** The fresh read of a command, applied only when no command left during it. */
+  applyFresh(fresh, readStart) {
+    const c = this.charger;
+    if (readStart <= c.lastSentAt) {
+      return;
+    }
+    if (fresh.status) {
+      c.status = fresh.status;
+    }
+    this.applyControl(fresh.control, { fromCommand: true });
+    // Shown in the background: the ack never waits for Gladys.
+    this.publishAll().catch((err) => this.logger.warn(`Publishing failed: ${err.message}`));
+  }
+
   /** The bookkeeping of a write at the moment it leaves. */
   markSent(entry, role) {
     const c = this.charger;
     entry.sentAt = this.now();
+    entry.previousChangeAt = this.memory.lastChangeAt;
     c.lastSentAt = this.now();
     if (role !== FEATURES.PAUSE) {
       this.memory.lastChangeAt = this.now();
@@ -1530,6 +1724,14 @@ export class AlfenApp {
       c.lastResumeAt = this.now();
     }
     this.saveMemory().catch(() => {});
+  }
+
+  /** A write the charger refused: the minute between two changes is not spent. */
+  unspend(entry) {
+    if (entry.previousChangeAt !== undefined && this.memory.lastChangeAt === entry.sentAt) {
+      this.memory.lastChangeAt = entry.previousChangeAt;
+      this.saveMemory().catch(() => {});
+    }
   }
 
   /** A pause that overtook a resume that left, or sent while a resume is unconfirmed: reaffirmed. */
@@ -1541,41 +1743,73 @@ export class AlfenApp {
       : undefined;
   }
 
-  /** The error a failed command answers, and what it leaves behind (guards, pauses, block). */
-  async commandFailed(err, { serial, role, entry, plan }) {
+  /**
+   * The error a failed command answers, and what it leaves behind (guards,
+   * pauses, block). A command of a configuration replaced meanwhile leaves
+   * nothing behind: its answer only goes back to Gladys.
+   */
+  async commandFailed(err, { serial, role, entry, plan, generation }) {
     if (err?.refusal) {
       return err;
     }
+    const stale = generation !== this.generation;
     const reason = errorReason(err);
     const isPause = role === FEATURES.PAUSE;
-    if (entry.sentAt === undefined || notSent(err)) {
+    const sent = entry.sentAt !== undefined;
+    if (
+      sent &&
+      (err.kind === ERROR_KINDS.REJECTED || (err.kind === ERROR_KINDS.SESSION && err.status))
+    ) {
+      // The charger answered the write itself with a refusal.
+      this.unspend(entry);
+      if (!stale) this.followUp();
+      return this.refusal(ERRORS.refused(reason));
+    }
+    if (!sent || notSent(err)) {
       // Nothing written (the minute between two changes is not spent).
+      if (sent) this.unspend(entry);
       switch (err.kind) {
         case ERROR_KINDS.CERTIFICATE:
           return this.refusal(ERRORS.certificate);
         case ERROR_KINDS.OTHER_CHARGER:
           return this.refusal(ERRORS.otherCharger);
+        case ERROR_KINDS.STALE:
+          return this.refusal(ERRORS.unknownCharger);
+        case ERROR_KINDS.STORAGE:
+          return this.refusal(ERRORS.storage);
         case ERROR_KINDS.LATE:
         case ERROR_KINDS.TIMEOUT:
           // Before the write, every request is bounded by the deadline of the command.
           return this.refusal(ERRORS.tooSlow);
         case ERROR_KINDS.ABORTED:
-          return this.refusal(ERRORS.pauseMeanwhile);
+          return this.refusal(stale ? ERRORS.unknownCharger : ERRORS.pauseMeanwhile);
         case ERROR_KINDS.SESSION:
-          // The session was lost (another app logged in?): not a refused password.
-          return this.refusal(ERRORS.refused(reason));
+          // The session was lost before the write (another app logged in?).
+          return this.refusal(ERRORS.sessionLost);
         case ERROR_KINDS.AUTH:
-          if (this.config.auth) {
-            await this.authFailed();
+          if (!stale && this.config.auth) {
+            if (isPause && this.memory.block) {
+              // A pause during a block: its own spacing only, the reads keep theirs.
+              this.memory.block.refusedAt = this.now();
+              await this.saveMemory();
+            } else {
+              await this.authFailed();
+            }
             this.updateStatus().catch(() => {});
           }
-          return this.refusal(ERRORS.refused(reason));
+          return this.refusal(ERRORS.credentialsRefused);
         case ERROR_KINDS.RATE_LIMITED:
-          await this.pause(err);
-          this.updateStatus().catch(() => {});
-          return this.refusal(ERRORS.refused(reason));
+          if (!stale) {
+            await this.pause(err);
+            this.updateStatus().catch(() => {});
+          }
+          return this.refusal(
+            ERRORS.rateLimitedNotSent(
+              age(Math.max(0, (this.memory.pause?.until ?? 0) - this.now())),
+            ),
+          );
         default:
-          if (!isPause && entry.sentAt === undefined && plan === undefined) {
+          if (!isPause && plan === undefined) {
             return this.refusal(ERRORS.unknownState(reason));
           }
           return this.refusal(ERRORS.notSent(reason));
@@ -1583,23 +1817,23 @@ export class AlfenApp {
     }
     this.logger.warn(`Alfen: ${role} failed (${reason})`);
     if (err.kind === ERROR_KINDS.RATE_LIMITED) {
-      await this.pause(err);
-      this.updateStatus().catch(() => {});
-      return this.refusal(ERRORS.refused(reason));
-    }
-    if (err.kind === ERROR_KINDS.REJECTED || err.kind === ERROR_KINDS.SESSION) {
-      this.followUp();
+      if (!stale) {
+        await this.pause(err);
+        this.updateStatus().catch(() => {});
+      }
       return this.refusal(ERRORS.refused(reason));
     }
     // A silence, a 5xx, a cut connection after the write: it may have reached the charger.
-    if (role === FEATURES.RESUME) {
-      // It may still land later, even after a pause: a pause sent within
-      // the next 90 s is reaffirmed if a read shows the charge resumed.
-      this.memory.unconfirmedResumeUntil = this.now() + TIMINGS.guard;
-      await this.saveMemory();
+    if (!stale) {
+      if (role === FEATURES.RESUME) {
+        // It may still land later, even after a pause: a pause sent within
+        // the next 90 s is reaffirmed if a read shows the charge resumed.
+        this.memory.unconfirmedResumeUntil = this.now() + TIMINGS.guard;
+        await this.saveMemory();
+      }
+      this.guard(serial, plan, this.reassertFrom(entry));
+      this.followUp();
     }
-    this.guard(serial, plan, this.reassertFrom(entry));
-    this.followUp();
     return this.refusal(ERRORS.sentUnconfirmed(reason));
   }
 
@@ -1712,9 +1946,10 @@ export class AlfenApp {
       return;
     }
     this.logger.warn('Alfen: the charge resumed after a pause, pause sent again');
+    const generation = this.generation;
     const send = async () => {
       // Never two sessions: the read that saw it has ended; a command under way gives way.
-      await this.takeCharger(SESSION.PAUSE, this.now());
+      await this.acquire(SESSION.PAUSE, this.now());
       await this.openSession(
         SESSION.PAUSE,
         (api) =>
@@ -1727,12 +1962,15 @@ export class AlfenApp {
               this.charger.lastSentAt = this.now();
             },
           }),
-        { deadline: this.now() + 4 * TIMINGS.readTimeout, serial },
+        { deadline: this.now() + 4 * TIMINGS.readTimeout, serial, generation },
       );
     };
     send()
       .then(() => this.followUp())
       .catch(async (err) => {
+        if (generation !== this.generation) {
+          return;
+        }
         this.logger.warn(`Alfen: pause reaffirmed failed (${errorReason(err)})`);
         // The guard keeps its reaffirmation: the next read tries again (twice at most in all).
         this.followUp();

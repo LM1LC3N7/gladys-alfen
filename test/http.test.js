@@ -193,7 +193,8 @@ test('only the two command properties, in whole amperes, are ever written', asyn
     ['2126_0', 1],
     ['2129_0', 5],
     ['2062_0', 1.5],
-    ['2062_0', 40],
+    ['2062_0', 81],
+    ['2062_0', 3],
   ]) {
     await assert.rejects(
       client.session(sessionOf(address, { pin: cert.fingerprint }), (api) =>

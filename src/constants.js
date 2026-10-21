@@ -79,6 +79,8 @@ export const CURRENT = {
   min: 6,
   max: 32,
   defaultCeiling: 16,
+  /** The highest maximum station current written back by a resume (40 A sockets exist). */
+  station: 80,
   /** A current read back within this tolerance is the one asked. */
   tolerance: 0.1,
 };
@@ -315,6 +317,9 @@ export const TIMINGS = {
   commandAnswerBy: 4_300,
   /** Time left to send after the fresh read, at least. */
   commandMinSend: 300,
+  /** A pause reads the control first only with this much time left, the read bounded to pauseReadMax. */
+  pauseReadMin: 1_500,
+  pauseReadMax: 1_000,
   /** Reads after a command, spaced: its effect, then a check. */
   followUps: [5 * SECOND, 20 * SECOND],
   /** A sent command keeps its guard until the charger shows what it asked, or 90 s. */

@@ -33,12 +33,20 @@ the notes of the version's GitHub Release.
   and never held back (not by a command in flight, the minute between
   changes, a 429/5xx pause, a failed read, nor a restart), sent again when a
   resume left unconfirmed lands after it; during refused credentials, one
-  login at most every 5 minutes.
-- "Resume charging" button (the station current read before the pause,
-  capped) and a charging current list (6 A to a ceiling of 16 A by default,
-  lowered by the maximum station current), refused unless "Allow resuming
-  and the charging current" is on (off by default); resume refused without a
-  vehicle plugged in; one change a minute.
+  login at most every 5 minutes (a pause that goes through lifts the block).
+  It reads the station current first when time allows: kept in `/data` for
+  the resume, nothing written when already paused.
+- "Resume charging" button (exactly the station current kept at the pause,
+  refused when none was kept, shown in the status during a pause) and a
+  charging current list (6 A to a ceiling of 16 A by default, lowered by the
+  maximum station current), refused unless "Allow resuming and the charging
+  current" is on (off by default); resume refused without a vehicle plugged
+  in; one change a minute (not spent by a refused write).
+- Never two sessions on the charger; a session pins nothing and sends no
+  password once the address or the credentials changed; the first pin must
+  be written to `/data` before the password leaves; "Trust the new
+  certificate" in two clicks; TLS 1.2 at least; the password sent as typed;
+  interim HTTP answers (100 Continue) skipped.
 - Reads every 60 s (configurable), never sooner, restarts and reconnections
   included; failures retried after 30 s to 5 minutes; 429 and 5xx pause,
   kept in `/data`; refused credentials are tried again after 15 min, 1 h,

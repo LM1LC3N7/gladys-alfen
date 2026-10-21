@@ -70,11 +70,12 @@ export const addressKey = ({ host, port }) => (port === DEFAULT_PORT ? host : `$
 const strictTrue = (value) => value === true || value === 'true';
 
 /** A user name or a password typed in the form: printable ASCII, else ''. */
-function secret(value) {
+function secret(value, { trim = true } = {}) {
   if (typeof value !== 'string') {
     return '';
   }
-  const text = value.trim();
+  // A password is sent as typed (a space is a character of it); a user name is trimmed.
+  const text = trim ? value.trim() : value;
   if (text.length < LIMITS.secretMin || text.length > LIMITS.secretMax) {
     return '';
   }
@@ -95,8 +96,8 @@ export function normalizeConfig(raw = {}) {
   const address = credentialsInHost ? undefined : parseAddress(typed);
   const typedUser = typeof c.username === 'string' && c.username.trim() !== '';
   const username = typedUser ? secret(c.username) : DEFAULT_USERNAME;
-  const password = secret(c.password);
-  const typedPassword = typeof c.password === 'string' && c.password.trim() !== '';
+  const password = secret(c.password, { trim: false });
+  const typedPassword = typeof c.password === 'string' && c.password !== '';
   const interval = Number(c.poll_interval);
   const ceiling = Number(c.max_current);
   return {

@@ -166,9 +166,9 @@ up to date at the end of every milestone.
   only) and `set-current` (`text/select` of whole amperes from 6 A to the
   ceiling); never a switch nor a writable binary. The pause writes `2062_0`
   = 0 (alfen_wallbox's charging switch: the charger has no pause command);
-  the resume writes `2062_0` back to the last station current read at 6 A or
-  more (kept in `/data`), capped by `max_current` (6 A when never read); the
-  current writes `2129_0` (6–32 A, whole). The client refuses any other
+  the resume writes `2062_0` back to exactly the station current kept at the
+  pause (see "Review 1 fixes", B1; 6–80 A, whole); the current writes
+  `2129_0` (6–32 A, whole). The client refuses any other
   property or value. Never the phases, the solar charging, the RFID mode, a
   reboot.
 - **"Pause charging" is protective** (no option, never held back): it takes
@@ -224,6 +224,40 @@ up to date at the end of every milestone.
   a time).
 - **gladys_version >= 5.1.0** (as the sibling local modules); **category
   `energy`**, transport `local`.
+- **Review 1 fixes** (2026-10-21, scenarios in `test/review.test.js`):
+  - B1: the station current a resume writes back (`resumeCurrent`) is kept
+    in `/data` at the pause only, before 0 is written: the value read in the
+    session of the pause (else the last one read), never replaced by a read
+    during the pause (it shows 0). The resume writes exactly it, never
+    capped (`max_current` only caps the socket current `2129_0`); none
+    kept: the resume is refused. `client.write` takes 0 or 6–80 A for
+    `2062_0`. During a pause the status shows the value to set back (M9);
+  - I1: `this.busy` checked again after every wait (`acquire`, after
+    `markRead`), `openSession` refuses while another session holds the
+    charger; a session given up (its connection closed) no longer holds it;
+  - I2: `onNewCredentials` and every restart give up the sessions under way
+    and change the generation before any wait; a command of an old
+    generation leaves nothing behind (no block, pause, guard, follow-up);
+  - I3: the address, the credentials, the target of the pin and the
+    generation are fixed per session; `trust` refuses (STALE, nothing
+    written) a session of another address or configuration; the client does
+    nothing after a connection given up while it connected;
+  - I4: any login accepted with the credentials of now lifts the block and
+    reschedules; a pause refused during a block only moves its own spacing
+    (`refusedAt`), never the count nor the wait of the reads; one login
+    every 5 minutes stays;
+  - I5: the pause reads `generic` first when 1.5 s are left (1 s at most): it
+    keeps the station current and writes nothing (no follow-up read) when
+    already paused and no resume may land; a read that fails is no reason
+    not to write (a connection lost with it: the pause goes in a new
+    session);
+  - M1: "Trust the new certificate" in two clicks, exactly the fingerprint
+    shown; M2: a first pin that cannot be written to `/data` stops the
+    session before the login (STORAGE, said in the status); M3: texts of a
+    command not sent (credentials, 429, session lost); M4: a write refused
+    gives back the minute; M5: `minVersion: 'TLSv1.2'`, said in the docs;
+    M6: the password is never trimmed; M7: 1xx answers skipped; M8: the
+    ceiling checked again in `beforeSend`.
 - **Demo files of the template** (`src/devices/*`, `scenes.js`, `widgets.js`,
   `weather.js` and their tests, the demo `test/config.test.js`) deleted with
   `git rm`.

@@ -286,7 +286,7 @@ export class AlfenClient {
    * `logoutTimeout`.
    */
   async session(
-    { address, auth, deadline, requestTimeout, logoutTimeout, trust, identify, onOpen },
+    { address, auth, deadline, requestTimeout, logoutTimeout, trust, identify, onOpen, onLogin },
     work,
   ) {
     const connection = await this.connect({
@@ -298,7 +298,14 @@ export class AlfenClient {
     let loggedIn = false;
     try {
       onOpen?.(connection);
+      if (connection.closed) {
+        // Given up while it connected: nothing is checked nor written.
+        throw new ChargerError(ERROR_KINDS.ABORTED, 'Session given up', { notSent: true });
+      }
       await trust(connection.fingerprint);
+      if (connection.closed) {
+        throw new ChargerError(ERROR_KINDS.ABORTED, 'Session given up', { notSent: true });
+      }
       let info;
       let infoError;
       try {
@@ -325,6 +332,9 @@ export class AlfenClient {
         infoError = err;
       }
       await identify(info, infoError);
+      if (connection.closed) {
+        throw new ChargerError(ERROR_KINDS.ABORTED, 'Session given up', { notSent: true });
+      }
       if (!auth) {
         throw new ChargerError(ERROR_KINDS.AUTH, 'No password', { notSent: true });
       }
@@ -342,6 +352,7 @@ export class AlfenClient {
         throw statusError(answer, this.now(), { login: true });
       }
       loggedIn = true;
+      await onLogin?.();
       // Newer firmware: a bearer token for the requests of this connection (memory only).
       let data;
       try {
@@ -353,7 +364,11 @@ export class AlfenClient {
       token =
         typeof access === 'string' && /^[\x21-\x7e]{1,4096}$/.test(access) ? access : undefined;
       const api = {
-        props: (category) => this.category(connection, token, category, deadline, requestTimeout),
+        props: (category, { by = deadline, timeout = requestTimeout } = {}) =>
+          this.category(connection, token, category, by, timeout),
+        get closed() {
+          return connection.closed;
+        },
         write: (id, value, options) => this.write(connection, token, id, value, options),
       };
       return await work(api, info);
@@ -420,7 +435,10 @@ export class AlfenClient {
    */
   async write(connection, token, id, value, { timeoutMs, beforeSend }) {
     const valid =
-      (id === PROPS.STATION_MAX && Number.isInteger(value) && value >= 0 && value <= CURRENT.max) ||
+      // The station current: 0 (pause), or the value read before the pause (6 to 80 A).
+      (id === PROPS.STATION_MAX &&
+        Number.isInteger(value) &&
+        (value === 0 || (value >= CURRENT.min && value <= CURRENT.station))) ||
       (id === PROPS.SOCKET_MAX &&
         Number.isInteger(value) &&
         value >= CURRENT.min &&
