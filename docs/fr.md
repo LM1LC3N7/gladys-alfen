@@ -135,7 +135,9 @@ ne lui coûte rien : jamais pendant une pause 429/5xx ni un blocage (une
 session, une écriture), et seulement si le temps restant couvre la lecture et
 une nouvelle session. Elle n'écrit rien si la borne est déjà en pause (pas de
 lecture de suivi alors) ; si cette lecture échoue, la pause est écrite quand
-même.
+même. Risque restant : si l'installateur change la limite puis que la borne
+est mise en pause depuis l'application dans le même intervalle de lecture,
+Gladys n'a pas vu la nouvelle limite et une reprise réécrirait l'ancienne.
 
 Quand une reprise est restée sans confirmation, elle peut encore atteindre la
 borne plus tard : une pause envoyée dans les 90 secondes qui suivent est

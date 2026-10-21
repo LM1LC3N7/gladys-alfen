@@ -394,3 +394,14 @@ test('m1 a command given up by a new configuration: the text says so', async (t)
   assert.match(ack.error, /La configuration a changé pendant la commande : non envoyée, réessayez/);
   assert.deepEqual(ctx.server.writes(), []);
 });
+
+// --- Review 3 ------------------------------------------------------------------
+
+test('S15e a pause read over several pages stays within the time reserved: the pause is written', async (t) => {
+  const ctx = await setup(t, { server: fakeCharger({ pageSize: 1 }) });
+  ctx.charger.delays.login = 300;
+  ctx.charger.delays.generic = 600;
+  const ack = await ctx.press('pause-charge');
+  assert.equal(ack.success, true, ack.error);
+  assert.deepEqual(ctx.server.writes(), [{ '2062_0': '0' }]);
+});

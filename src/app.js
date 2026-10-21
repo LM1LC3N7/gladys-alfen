@@ -1626,7 +1626,8 @@ export class AlfenApp {
           try {
             control = parseControl(
               await api.props(CATEGORIES.GENERIC, {
-                by: sendBy - TIMINGS.commandMinSend,
+                // The whole read (every page) within the time reserved for it.
+                by: Math.min(sendBy - TIMINGS.commandMinSend, readStart + TIMINGS.pauseReadMax),
                 timeout: TIMINGS.pauseReadMax,
               }),
             );

@@ -127,7 +127,9 @@ writing, the pause reads that current only when it costs it nothing: never
 during a 429/5xx pause or a block (one session, one write), and only when
 the time left covers the read and a new session. It writes nothing when the
 charger is already paused (no follow-up read then); if that read fails, the
-pause is written anyway.
+pause is written anyway. Remaining risk: if the installer changes the limit
+and the charger is then paused from the app within the same read interval,
+Gladys never saw the new limit and a resume would write back the old one.
 
 When a resume was left without confirmation, it may still reach the charger
 later: a pause sent within the next 90 seconds is watched, and sent again
