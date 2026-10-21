@@ -127,11 +127,15 @@ n'est jamais renvoyé en boucle (par une scène par exemple). Une pause qui
 passe lève le blocage et les lectures reprennent ; une pause refusée
 n'allonge pas l'attente des lectures.
 
-Avant d'écrire, la pause relit le courant maximal de la borne quand le temps
-le permet : elle **garde dans `/data` la valeur d'avant la pause** (celle
-qu'une reprise réécrira), et n'écrit rien si la borne est déjà en pause (pas
-de lecture de suivi alors). Si cette lecture échoue, la pause est écrite
-quand même.
+Chaque lecture où le courant maximal de la borne vaut 6 A ou plus le **garde
+dans `/data`** : c'est la valeur qu'une reprise réécrira, toujours la limite
+de l'installation la plus récente (une lecture pendant une pause, à 0 A, ne
+remplace rien). Avant d'écrire, la pause relit ce courant seulement si cela
+ne lui coûte rien : jamais pendant une pause 429/5xx ni un blocage (une
+session, une écriture), et seulement si le temps restant couvre la lecture et
+une nouvelle session. Elle n'écrit rien si la borne est déjà en pause (pas de
+lecture de suivi alors) ; si cette lecture échoue, la pause est écrite quand
+même.
 
 Quand une reprise est restée sans confirmation, elle peut encore atteindre la
 borne plus tard : une pause envoyée dans les 90 secondes qui suivent est
@@ -155,9 +159,9 @@ toute commande tant que **Autoriser la reprise et le courant de charge** est
 désactivé (par défaut). Activé :
 
 - **Reprendre** remet le courant maximal de la borne à **exactement** la
-  valeur gardée au moment de la pause (la limite de votre installation),
-  jamais plafonnée ni devinée : sans valeur gardée (pause faite hors de
-  Gladys), la reprise est **refusée** ; refusée aussi **sans véhicule
+  dernière valeur lue à 6 A ou plus (la limite de votre installation),
+  jamais plafonnée ni devinée : sans valeur connue (borne toujours vue en
+  pause), la reprise est **refusée** ; refusée aussi **sans véhicule
   branché**, ou sur une erreur ou un état inconnu.
 - **Courant de charge** (`2129_0`, la prise 1) : de 6 A au **plafond** : le
   plus bas du « Plafond du courant de charge » de la configuration (16 A par

@@ -258,6 +258,18 @@ up to date at the end of every milestone.
     gives back the minute; M5: `minVersion: 'TLSv1.2'`, said in the docs;
     M6: the password is never trimmed; M7: 1xx answers skipped; M8: the
     ceiling checked again in `beforeSend`.
+- **Review 2 fixes** (2026-10-21, S14-S18 in `test/review.test.js`):
+  - R1: `resumeCurrent` follows every read where `2062_0` is 6 A or more
+    (poll, fresh read of a command, read of a pause), never capped, kept in
+    `/data`; a read at 0 (a pause) replaces nothing; the status shows it.
+    An installer lowering the limit is therefore followed;
+  - R2: no read before a pause during a 429/5xx pause or a block (one
+    session, one write); elsewhere the read is made only when the time left
+    covers it and a new session at the pace measured in this one
+    (connection + login), else the pause is written at once; a 429 answered
+    to that read is kept (pause), the pause still goes;
+  - m1: a command given up by a new configuration says "the configuration
+    changed during the command: not sent, try again".
 - **Demo files of the template** (`src/devices/*`, `scenes.js`, `widgets.js`,
   `weather.js` and their tests, the demo `test/config.test.js`) deleted with
   `git rm`.

@@ -34,10 +34,11 @@ the notes of the version's GitHub Release.
   changes, a 429/5xx pause, a failed read, nor a restart), sent again when a
   resume left unconfirmed lands after it; during refused credentials, one
   login at most every 5 minutes (a pause that goes through lifts the block).
-  It reads the station current first when time allows: kept in `/data` for
-  the resume, nothing written when already paused.
-- "Resume charging" button (exactly the station current kept at the pause,
-  refused when none was kept, shown in the status during a pause) and a
+  It reads the station current first only when that costs it nothing (never
+  during a 429/5xx pause or a block, and only when time covers a new
+  session): nothing written when already paused.
+- "Resume charging" button (exactly the last station current read at 6 A or
+  more, kept in `/data`, refused when none is known, shown in the status during a pause) and a
   charging current list (6 A to a ceiling of 16 A by default, lowered by the
   maximum station current), refused unless "Allow resuming and the charging
   current" is on (off by default); resume refused without a vehicle plugged

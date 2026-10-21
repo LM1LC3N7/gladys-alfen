@@ -793,9 +793,13 @@ export class AlfenApp {
   /** fromCommand: the fresh read of a command (never reaffirms a pause: it would race it). */
   applyControl(control, { fromCommand = false } = {}) {
     const c = this.charger;
-    // The station current a resume writes back is kept at the pause only
-    // (keepResumeCurrent), never by a read: a read during a pause shows 0.
+    // The station current a resume writes back follows every read at 6 A or
+    // more (the installation limit as it is now, never capped); a read during
+    // a pause shows 0 and replaces nothing.
     c.control = control;
+    if (control.stationMax !== undefined && control.stationMax >= CURRENT.min) {
+      this.memory.resumeCurrent = Math.min(CURRENT.station, Math.floor(control.stationMax));
+    }
     if (c.serial) {
       this.observe(c.serial, control, { fromCommand });
     }
@@ -1590,6 +1594,9 @@ export class AlfenApp {
     this.checkBeforeSend(generation, serial, role);
     let plan;
     let freshControl;
+    let sessionStart = this.now();
+    // A 429/5xx pause or a block: the pause is one session, one write, no read.
+    const constrained = this.paused || this.blocked;
     const work = (skipRead) => async (api, _info, session) => {
       const readStart = this.now();
       const given = () => generation !== this.generation || session.aborted;
@@ -1609,7 +1616,13 @@ export class AlfenApp {
         // a read that fails or lags never stops it): the station current to
         // write back on a resume, and nothing written when already paused.
         let control;
-        if (!skipRead && sendBy - this.now() >= TIMINGS.pauseReadMin) {
+        // Read only when it costs nothing to the pause: never during a 429/5xx
+        // pause or a block (one session, one write), and only when the time
+        // left covers the read AND a new session at the pace measured in this
+        // one (connection + login), should the read lose the connection.
+        const setup = readStart - sessionStart;
+        const room = sendBy - this.now() - TIMINGS.commandMinSend;
+        if (!skipRead && !constrained && room >= TIMINGS.pauseReadMax + setup) {
           try {
             control = parseControl(
               await api.props(CATEGORIES.GENERIC, {
@@ -1619,6 +1632,10 @@ export class AlfenApp {
             );
           } catch (err) {
             if (err.kind === ERROR_KINDS.ABORTED || err.refusal) throw err;
+            if (err.kind === ERROR_KINDS.RATE_LIMITED && !given()) {
+              // Kept for every other path; the pause itself still goes.
+              await this.pause(err);
+            }
             if (api.closed) {
               // The connection is gone with the read: the pause goes in a new session.
               throw new ChargerError(ERROR_KINDS.SESSION, 'Read failed', {
@@ -1667,14 +1684,16 @@ export class AlfenApp {
         },
       });
     };
-    const attempt = (skipRead) =>
-      this.openSession(isPause ? SESSION.PAUSE : SESSION.COMMAND, work(skipRead), {
+    const attempt = (skipRead) => {
+      sessionStart = this.now();
+      return this.openSession(isPause ? SESSION.PAUSE : SESSION.COMMAND, work(skipRead), {
         deadline: sendBy - (isPause ? 0 : TIMINGS.commandMinSend),
         serial,
         generation,
         // The ack must reach Gladys within 5 s: the logout never delays it.
         logoutTimeout: () => Math.min(TIMINGS.logoutTimeout, answerBy + 400 - this.now()),
       });
+    };
     try {
       try {
         await attempt(false);
@@ -1707,6 +1726,7 @@ export class AlfenApp {
       c.status = fresh.status;
     }
     this.applyControl(fresh.control, { fromCommand: true });
+    this.saveMemory().catch(() => {});
     // Shown in the background: the ack never waits for Gladys.
     this.publishAll().catch((err) => this.logger.warn(`Publishing failed: ${err.message}`));
   }
@@ -1774,7 +1794,7 @@ export class AlfenApp {
         case ERROR_KINDS.OTHER_CHARGER:
           return this.refusal(ERRORS.otherCharger);
         case ERROR_KINDS.STALE:
-          return this.refusal(ERRORS.unknownCharger);
+          return this.refusal(ERRORS.configChanged);
         case ERROR_KINDS.STORAGE:
           return this.refusal(ERRORS.storage);
         case ERROR_KINDS.LATE:
@@ -1782,7 +1802,7 @@ export class AlfenApp {
           // Before the write, every request is bounded by the deadline of the command.
           return this.refusal(ERRORS.tooSlow);
         case ERROR_KINDS.ABORTED:
-          return this.refusal(stale ? ERRORS.unknownCharger : ERRORS.pauseMeanwhile);
+          return this.refusal(stale ? ERRORS.configChanged : ERRORS.pauseMeanwhile);
         case ERROR_KINDS.SESSION:
           // The session was lost before the write (another app logged in?).
           return this.refusal(ERRORS.sessionLost);

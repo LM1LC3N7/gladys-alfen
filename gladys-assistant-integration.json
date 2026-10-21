@@ -94,8 +94,8 @@
         "fr": "Autoriser la reprise et le courant de charge"
       },
       "description": {
-        "en": "Off by default. On: Gladys may resume the charge (button, the station current kept at the pause written back exactly) and set the charging current (list, 6 A to the ceiling below). Off: these two features refuse every command. \"Pause charging\" is always available: it sets the maximum station current of the charger to 0 A, which stays until a resume (the value to set back is shown in the status); with this option off, only the Alfen app (MyEve, Eve Connect) resumes it (a forgotten pause may prevent the next charge).",
-        "fr": "Désactivé par défaut. Activé : Gladys peut reprendre la charge (bouton, le courant maximal gardé au moment de la pause réécrit exactement) et régler le courant de charge (liste, de 6 A au plafond ci-dessous). Désactivé : ces deux fonctionnalités refusent toute commande. « Mettre la charge en pause » reste toujours disponible : elle met le courant maximal de la borne à 0 A, ce qui reste jusqu'à une reprise (la valeur à remettre est affichée dans l'état) ; option désactivée, seule l'application Alfen (MyEve, Eve Connect) la reprend (une pause oubliée peut empêcher la charge suivante)."
+        "en": "Off by default. On: Gladys may resume the charge (button, the last station current read at 6 A or more written back exactly) and set the charging current (list, 6 A to the ceiling below). Off: these two features refuse every command. \"Pause charging\" is always available: it sets the maximum station current of the charger to 0 A, which stays until a resume (the value to set back is shown in the status); with this option off, only the Alfen app (MyEve, Eve Connect) resumes it (a forgotten pause may prevent the next charge).",
+        "fr": "Désactivé par défaut. Activé : Gladys peut reprendre la charge (bouton, le dernier courant maximal lu à 6 A ou plus réécrit exactement) et régler le courant de charge (liste, de 6 A au plafond ci-dessous). Désactivé : ces deux fonctionnalités refusent toute commande. « Mettre la charge en pause » reste toujours disponible : elle met le courant maximal de la borne à 0 A, ce qui reste jusqu'à une reprise (la valeur à remettre est affichée dans l'état) ; option désactivée, seule l'application Alfen (MyEve, Eve Connect) la reprend (une pause oubliée peut empêcher la charge suivante)."
       },
       "required": false,
       "default": false
@@ -108,8 +108,8 @@
         "fr": "Plafond du courant de charge (A)"
       },
       "description": {
-        "en": "The highest charging current (socket current) Gladys may ask for (16 A by default). The lower of this value and the maximum station current read on the charger applies. A resume always writes back exactly the station current kept at the pause.",
-        "fr": "Le courant de charge (courant de la prise) le plus élevé que Gladys peut demander (16 A par défaut). La plus basse de cette valeur et du courant maximal de la borne lu sur celle-ci s'applique. Une reprise réécrit toujours exactement le courant maximal gardé au moment de la pause."
+        "en": "The highest charging current (socket current) Gladys may ask for (16 A by default). The lower of this value and the maximum station current read on the charger applies. A resume always writes back exactly the last station current read at 6 A or more.",
+        "fr": "Le courant de charge (courant de la prise) le plus élevé que Gladys peut demander (16 A par défaut). La plus basse de cette valeur et du courant maximal de la borne lu sur celle-ci s'applique. Une reprise réécrit toujours exactement le dernier courant maximal lu à 6 A ou plus."
       },
       "required": false,
       "default": 16,

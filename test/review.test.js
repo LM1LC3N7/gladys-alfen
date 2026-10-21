@@ -78,7 +78,7 @@ test('S1 the resume writes back exactly the 32 A of the installation, never capp
   const server = fakeCharger();
   server.charger.props.generic['2062_0'] = 32;
   const ctx = await setup(t, { config: ALLOWED, server });
-  assert.equal(ctx.store.data.resumeCurrent, null, 'kept at the pause only');
+  assert.equal(ctx.store.data.resumeCurrent, 32, 'followed by the reads');
   let ack = await ctx.press('pause-charge');
   assert.equal(ack.success, true, ack.error);
   assert.equal(ctx.store.data.resumeCurrent, 32, 'kept before 0 is written');
@@ -299,4 +299,98 @@ test('M7 a 100 Continue is skipped', () => {
   assert.equal(done, true);
   assert.equal(parser.result().status, 200);
   assert.equal(parser.result().body, 'ok');
+});
+
+// --- Review 2 ------------------------------------------------------------------
+
+test('S14 the installer lowers the limit to 20 A, the Alfen app pauses: the resume writes 20', async (t) => {
+  const server = fakeCharger();
+  server.charger.props.generic['2062_0'] = 32;
+  const ctx = await setup(t, { config: ALLOWED, server });
+  await ctx.press('pause-charge');
+  await ctx.advance(MINUTE);
+  await ctx.press('resume-charge');
+  await ctx.advance(2 * MINUTE);
+  ctx.charger.props.generic['2062_0'] = 20;
+  await ctx.advance(2 * MINUTE);
+  assert.equal(ctx.store.data.resumeCurrent, 20, 'kept in /data at each read');
+  ctx.charger.props.generic['2062_0'] = 0;
+  ctx.charger.props.states['2501_4'] = 178;
+  await ctx.advance(MINUTE);
+  assert.equal(ctx.store.data.resumeCurrent, 20, 'a read at 0 replaces nothing');
+  assert.match(ctx.gladys.fake.connectionStatus.message.en, /20 A before the pause/);
+  const ack = await ctx.press('resume-charge');
+  assert.equal(ack.success, true, ack.error);
+  assert.deepEqual(ctx.server.writes().at(-1), { '2062_0': '20' });
+});
+
+test('S15 slow login and slow page: no read before the pause, the pause is written', async (t) => {
+  const ctx = await setup(t);
+  ctx.charger.delays.login = 1_400;
+  ctx.charger.delays.generic = 1_100;
+  const n0 = ctx.server.requests.length;
+  const ack = await ctx.press('pause-charge');
+  assert.equal(ack.success, true, ack.error);
+  assert.deepEqual(ctx.server.writes(), [{ '2062_0': '0' }]);
+  assert.deepEqual(ctx.server.routes().slice(n0, n0 + 3), ['info', 'login', 'write']);
+});
+
+test('S15b slow login, fast page: the pause goes', async (t) => {
+  const ctx = await setup(t);
+  ctx.charger.delays.login = 1_400;
+  const ack = await ctx.press('pause-charge');
+  assert.equal(ack.success, true, ack.error);
+  assert.deepEqual(ctx.server.writes(), [{ '2062_0': '0' }]);
+});
+
+test('S17 a pause during a 429 pause: info, login, write, nothing more', async (t) => {
+  const ctx = await setup(t);
+  ctx.charger.statuses.generic = 429;
+  ctx.charger.headers = { 'retry-after': '600' };
+  await ctx.advance(MINUTE);
+  assert.equal(ctx.store.data.pause.reason, '429');
+  delete ctx.charger.statuses.generic;
+  const n0 = ctx.server.requests.length;
+  const c0 = ctx.server.connections.length;
+  const ack = await ctx.press('pause-charge');
+  assert.equal(ack.success, true, ack.error);
+  assert.deepEqual(ctx.server.routes().slice(n0), ['info', 'login', 'write']);
+  assert.equal(ctx.server.connections.length, c0 + 1, 'one session');
+});
+
+test('S17b a 429 answered to the read of a pause is kept; the pause still goes', async (t) => {
+  const ctx = await setup(t);
+  ctx.charger.statuses.generic = 429;
+  ctx.charger.headers = { 'retry-after': '600' };
+  const ack = await ctx.press('pause-charge');
+  assert.equal(ack.success, true, ack.error);
+  assert.equal(ctx.store.data.pause.reason, '429');
+  assert.deepEqual(ctx.server.writes(), [{ '2062_0': '0' }]);
+});
+
+test('S18 a pause during a block: no read before the write', async (t) => {
+  const ctx = await setup(t);
+  ctx.charger.busy = true;
+  await ctx.advance(MINUTE);
+  ctx.charger.busy = false;
+  await ctx.advance(5 * MINUTE, 30 * SECOND);
+  const n0 = ctx.server.requests.length;
+  const ack = await ctx.press('pause-charge');
+  assert.equal(ack.success, true, ack.error);
+  assert.deepEqual(ctx.server.routes().slice(n0, n0 + 3), ['info', 'login', 'write']);
+});
+
+test('m1 a command given up by a new configuration: the text says so', async (t) => {
+  const ctx = await setup(t);
+  ctx.charger.delays.login = 1_000;
+  const pause = ctx.send('pause-charge');
+  await settle();
+  await ctx.advance(300, 50);
+  const saved = ctx.app.configUpdated({ ...CONFIG, password: 'new pass' });
+  await settle();
+  await ctx.advance(3 * SECOND, 100);
+  await saved;
+  const ack = await pause;
+  assert.match(ack.error, /La configuration a changé pendant la commande : non envoyée, réessayez/);
+  assert.deepEqual(ctx.server.writes(), []);
 });

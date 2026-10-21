@@ -229,6 +229,10 @@ export const ERRORS = {
     'The certificate of the charger changed: nothing is sent to it ("Trust the new certificate" in the configuration).',
     'Le certificat de la borne a changé : rien ne lui est envoyé (« Faire confiance au nouveau certificat » dans la configuration).',
   ),
+  configChanged: both(
+    'The configuration changed during the command: not sent, try again.',
+    'La configuration a changé pendant la commande : non envoyée, réessayez.',
+  ),
   storage: both(
     'The certificate of the charger could not be kept in /data: the password is not sent. Not sent.',
     "Le certificat de la borne n'a pas pu être gardé dans /data : le mot de passe n'est pas envoyé. Non envoyée.",

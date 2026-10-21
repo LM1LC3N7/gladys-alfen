@@ -120,10 +120,14 @@ again in a loop (by a scene for instance). A pause that goes through lifts
 the block and the reads go on; a refused pause never lengthens the wait of
 the reads.
 
-Before writing, the pause reads the maximum station current when time
-allows: it **keeps in `/data` the value from before the pause** (the one a
-resume writes back), and writes nothing when the charger is already paused
-(no follow-up read then). If that read fails, the pause is written anyway.
+Every read where the maximum station current is 6 A or more **keeps it in
+`/data`**: the value a resume writes back, always the latest limit of the
+installation (a read during a pause, at 0 A, replaces nothing). Before
+writing, the pause reads that current only when it costs it nothing: never
+during a 429/5xx pause or a block (one session, one write), and only when
+the time left covers the read and a new session. It writes nothing when the
+charger is already paused (no follow-up read then); if that read fails, the
+pause is written anyway.
 
 When a resume was left without confirmation, it may still reach the charger
 later: a pause sent within the next 90 seconds is watched, and sent again
@@ -145,9 +149,9 @@ command while **Allow resuming and the charging current** is off (the
 default). On:
 
 - **Resume** sets the maximum station current back to **exactly** the value
-  kept at the pause (the limit of your installation), never capped nor
-  guessed: without a value kept (a pause made outside Gladys), the resume is
-  **refused**; refused too **without a vehicle plugged in**, or on an error
+  last read at 6 A or more (the limit of your installation), never capped
+  nor guessed: without a value known (a charger always seen paused), the
+  resume is **refused**; refused too **without a vehicle plugged in**, or on an error
   or an unknown state.
 - **Charging current** (`2129_0`, socket 1): from 6 A to the **ceiling**: the
   lower of the "Ceiling of the charging current" of the configuration (16 A

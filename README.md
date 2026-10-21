@@ -50,7 +50,7 @@ Gladys ⇄ SDK ⇄ src/handlers.js ⇄ src/app.js (AlfenApp)
 - **Commands**: `button/push` "Pause charging" (no option, never held back:
   writes the maximum station current `2062_0` = 0; sent again when a resume
   left unconfirmed lands after it, twice at most), `button/push` "Resume
-  charging" (writes back exactly the station current kept at the pause; refused when none was kept)
+  charging" (writes back exactly the last station current read at 6 A or more; refused when none is known)
   and a `text/select` for `2129_0` (6 A to the ceiling) behind
   `allow_commands` (off by default); never a switch nor a writable binary.
   Resume and current decide on a read in the same session, check the option

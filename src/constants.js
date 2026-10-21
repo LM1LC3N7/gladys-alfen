@@ -317,8 +317,7 @@ export const TIMINGS = {
   commandAnswerBy: 4_300,
   /** Time left to send after the fresh read, at least. */
   commandMinSend: 300,
-  /** A pause reads the control first only with this much time left, the read bounded to pauseReadMax. */
-  pauseReadMin: 1_500,
+  /** The read of the control before a pause, bounded (see command() for when it is made). */
   pauseReadMax: 1_000,
   /** Reads after a command, spaced: its effect, then a check. */
   followUps: [5 * SECOND, 20 * SECOND],
