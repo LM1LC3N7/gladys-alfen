@@ -1289,8 +1289,8 @@ export class AlfenApp {
    * (drop or jump, from → to, kWh). A second click within
    * TIMINGS.acceptConfirm takes exactly that, if the hold is still the same
    * (direction, from, threshold) and its value is still the one listed plus
-   * what the charger may have delivered since (a jump not below it, a drop
-   * not above it plus that margin); otherwise it is a first click again. A
+   * what the charger may have delivered since (never below it, never above
+   * it plus that margin, a jump or a drop); otherwise it is a first click again. A
    * save of the configuration or a reconnection never accepts anything.
    */
   async acceptHeldIndex() {
@@ -1307,9 +1307,8 @@ export class AlfenApp {
     const pending = this.pendingAccept;
     const asListed = () => {
       const top = pending.listed.to + guard.margin(pending.listed.at, now);
-      return held.direction === 'up'
-        ? held.to >= pending.listed.to && held.to <= top
-        : held.to <= top;
+      // Both ways a floor: a value lower than the one listed is a first click again.
+      return held.to >= pending.listed.to && held.to <= top;
     };
     if (
       !pending ||

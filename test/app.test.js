@@ -539,6 +539,29 @@ test('the energy index: never 0, a jump held, two clicks to accept it', async (t
   assert.equal(last(gladys, 'energy-index'), 20_000);
 });
 
+test('the energy index: a second click never takes a drop lower than the one listed', async (t) => {
+  const { gladys, advance, charger } = await setup(t);
+  charger.props.meter1['2221_22'] = 14_187_100;
+  await advance(MINUTE);
+  charger.props.meter1['2221_22'] = 12_000;
+  await advance(MINUTE);
+  assert.equal(last(gladys, 'energy-index'), 14_187.1, 'a drop held');
+  let ack = await gladys.fake.action(ACTIONS.ACCEPT_HELD);
+  assert.match(ack.data.message.en, /Click again within 60 s/);
+  charger.props.meter1['2221_22'] = 5_000;
+  await advance(MINUTE);
+  assert.equal(last(gladys, 'energy-index'), 14_187.1);
+  ack = await gladys.fake.action(ACTIONS.ACCEPT_HELD);
+  await settle();
+  assert.match(ack.data.message.en, /Click again within 60 s/, 'a first click again');
+  assert.match(ack.data.message.fr, /14187\.1 à 5 kWh/);
+  assert.equal(last(gladys, 'energy-index'), 14_187.1, 'never 5 kWh without a click');
+  ack = await gladys.fake.action(ACTIONS.ACCEPT_HELD);
+  await settle();
+  assert.match(ack.data.message.en, /^Accepted/);
+  assert.equal(last(gladys, 'energy-index'), 5, 'the value listed, accepted');
+});
+
 test('unreachable: offline states, spaced tries never sooner than the interval', async (t) => {
   const { gladys, server, advance, charger } = await setup(t);
   charger.down = true;
