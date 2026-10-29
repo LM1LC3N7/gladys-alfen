@@ -10,6 +10,8 @@ the notes of the version's GitHub Release.
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-10-29
+
 ### Fixed
 
 - The counter guard keeps the value you accepted as a floor: after an
@@ -69,6 +71,7 @@ the notes of the version's GitHub Release.
 - "Test the connection" button; documentation in English and French;
   `LICENSE` and `THIRD_PARTY_NOTICES.md` shipped in the image.
 
-[Unreleased]: https://github.com/LM1LC3N7/gladys-alfen/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/LM1LC3N7/gladys-alfen/compare/v0.1.3...HEAD
+[0.1.3]: https://github.com/LM1LC3N7/gladys-alfen/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/LM1LC3N7/gladys-alfen/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/LM1LC3N7/gladys-alfen/releases/tag/v0.1.1

@@ -1,6 +1,6 @@
 {
   "name": "gladys-alfen",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "private": true,
   "description": "Gladys Assistant external integration for Alfen Eve EV chargers (state, power, current and voltage per phase, guarded energy index, temperature; pause, and optional resume and charging current), over their local HTTPS API with a pinned certificate. Unofficial, not affiliated with Alfen.",
   "type": "module",
