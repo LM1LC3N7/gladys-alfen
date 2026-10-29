@@ -539,6 +539,19 @@ test('the energy index: never 0, a jump held, two clicks to accept it', async (t
   assert.equal(last(gladys, 'energy-index'), 20_000);
 });
 
+test('the energy index: a jump grown past the margin between the clicks is listed again', async (t) => {
+  const { gladys, advance, charger } = await setup(t);
+  charger.props.meter1['2221_22'] = 20_000_000;
+  await advance(MINUTE);
+  await gladys.fake.action(ACTIONS.ACCEPT_HELD);
+  charger.props.meter1['2221_22'] = 30_000_000;
+  await advance(MINUTE);
+  const ack = await gladys.fake.action(ACTIONS.ACCEPT_HELD);
+  await settle();
+  assert.match(ack.data.message.en, /Click again within 60 s/);
+  assert.equal(last(gladys, 'energy-index'), 14_187);
+});
+
 test('the energy index: a second click never takes a drop lower than the one listed', async (t) => {
   const { gladys, advance, charger } = await setup(t);
   charger.props.meter1['2221_22'] = 14_187_100;
