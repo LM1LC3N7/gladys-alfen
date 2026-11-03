@@ -36,6 +36,14 @@ up to date at the end of every milestone.
       alfen_wallbox reads it), several chargers, the phases and the solar
       charging (behind the option, never a switch).
 
+- [ ] **Index guard on the wall clock** (noted 2026-11-03, SDK 0.16
+      migration, wave 6): `guardOf` builds `new IndexGuard(…, this.now(), …)`
+      and `evaluateIndex` calls `guard.accept(total, this.now())`, `this.now`
+      being `Date.now`. A wall clock set back or forward moves the guard's
+      margin. Port it to a session clock as gladys-p1-monitor did (d4cff87,
+      model gladys-openems) in a later wave, with its own review; the index
+      logic is left untouched by the migration.
+
 ## To check on a real charger
 
 - That `GET /api/prop?cat=generic|states|meter1|temp&offset=n` answers as
@@ -70,6 +78,14 @@ up to date at the end of every milestone.
 
 ## Decisions
 
+- **SDK `^0.16.0`** (2026-11-03, migration wave 6): it adds the ai, tts and
+  music types; no effect here (`poll_frequency` unused, the device carries
+  `should_poll: false`). Every feature already had a numeric `min` and `max`
+  (text and select 0/0, buttons and binaries 0/1); `test/features.test.js`
+  now checks each one, for every ceiling and language, against the core
+  model. `npm test` runs with `--test-timeout=60000`. `keywords`,
+  `countries` and `gladys_version >= 5.3.0` wait until Gladys 5.3 is
+  widespread. Index logic unchanged (see the open item on the guard clock).
 - **Version 0.1.0 set by hand** in `package.json`, `package-lock.json`, the
   manifest and the `docker_image` tag (`ghcr.io/lm1lc3n7/gladys-alfen:0.1.0`);
   the first patch release gives 0.1.1. `test/manifest.test.js` checks the

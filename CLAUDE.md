@@ -15,7 +15,7 @@ its only runtime dependency. It started from the official JavaScript template.
 
 ```bash
 npm install
-npm test                                  # node --test, the built-in runner
+npm test                                  # node --test --test-timeout=60000
 node --test test/app.test.js              # one file
 node --test --test-name-pattern "pause"   # tests whose name matches
 npm run lint                              # ESLint
@@ -51,6 +51,11 @@ test/                             node --test, against the SDK's fake Gladys (in
 
 ## Rules
 
+- **Features follow the core model.** Every feature has a numeric `min` and
+  `max` (0/0 for text and select), `read_only` and `has_feedback`: Gladys
+  answers HTTP 422 otherwise, and the SDK's fake Gladys does not check it
+  (`test/features.test.js` does). The device carries `should_poll: false`
+  (Gladys 5.3 polls a device with `poll_frequency` unless it says so).
 - **External ids are forever.** Build them with
   `gladys.externalIds(type, platformId)`, `platformId` being the unique id the
   platform gives the device (here the `Identity` of the charger), never a
